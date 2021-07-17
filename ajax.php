@@ -2,10 +2,16 @@
 
 namespace WC\Components;
 
+use Bitrix\Main\ArgumentException;
+use Bitrix\Main\ArgumentNullException;
+use Bitrix\Main\ArgumentOutOfRangeException;
 use Bitrix\Main\Engine\Action;
 use Bitrix\Main\Engine\Controller;
 use Bitrix\Main\Engine\Response\AjaxJson;
 use Bitrix\Main\Error;
+use Bitrix\Main\Loader;
+use Bitrix\Main\LoaderException;
+use Bitrix\Main\NotImplementedException;
 use Bitrix\Main\Request;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
@@ -18,24 +24,48 @@ Loc::loadMessages(__DIR__ . '/class.php');
 
 class Debug1CAjaxController extends Controller
 {
-    /** @var Debug1C $class */
+    /**
+     * @var Debug1C $class
+     */
     private $class;
+
+    /**
+     * @var array $params
+     */
     private $params;
+
+    /**
+     * @var HttpClient $httpClient
+     */
     private $httpClient;
+
+    /**
+     * @var string $sessid
+     */
     private $sessid;
+
     private $log;
     private $logFile;
 
+    /**
+     * Debug1CAjaxController constructor.
+     *
+     * @param Request|null $request Request.
+     * @throws LoaderException
+     */
     public function __construct(Request $request = null)
     {
         parent::__construct($request);
 
-        \Bitrix\Main\Loader::includeModule('sale');
+        Loader::includeModule('sale');
 
         $this->class = \CBitrixComponent::includeComponentClass('wc:debug1c');
         $this->logFile = $this->class::getPathLogFile();
     }
 
+    /**
+     * @inheritDoc
+     */
     public function configureActions(): array
     {
         return [
@@ -45,18 +75,48 @@ class Debug1CAjaxController extends Controller
             'prepare' => [
                 'prefilters' => [], 'postfilters' => [],
             ],
+            'silence' => [
+                'prefilters' => [], 'postfilters' => [],
+            ],
         ];
     }
 
+    /**
+     * @inheritDoc
+     */
     public function processBeforeAction(Action $action): bool
     {
         switch ($action->getName()) {
-            case 'init':
-                if (!$this->params = $this->getParams()) {
+            case 'silence':
+                $type = $this->request->getQuery('type') ?? 'catalog';
+                $mode = (string)$this->request->getQuery('work');
+                $params = [
+                    'TYPE_MODE' => json_encode(['TYPE' => $type, 'MODE' => $mode]),
+                    'EXCHANGE_URL' => $this->request->getQuery('exchange')
+                ];
+
+                $login = (string)$this->request->getQuery('login');
+                $password = (string)$this->request->getQuery('password');
+                $unsignedParameters = ['LOGIN' => $login, 'PASSWORD' => $password];
+
+                if (!$this->params = $this->getParams($params)) {
                     return false;
                 }
 
-                if (!$this->createHttpClient()) {
+                if (!$this->createHttpClient($unsignedParameters)) {
+                    $this->addError(new Error('Error creating http client'));
+                    return false;
+                }
+
+                break;
+            case 'init':
+                $params = $this->request->toArray() ?: [];
+                if (!$this->params = $this->getParams($params)) {
+                    return false;
+                }
+
+                if (!$this->createHttpClient($this->getUnsignedParameters())) {
+                    $this->addError(new Error('Error creating http client'));
                     return false;
                 }
 
@@ -66,6 +126,9 @@ class Debug1CAjaxController extends Controller
         return true;
     }
 
+    /**
+     * @return AjaxJson
+     */
     public function prepareAction(): AjaxJson
     {
         $result = new Result();
@@ -79,9 +142,35 @@ class Debug1CAjaxController extends Controller
         return new AjaxJson(null, $isSuccess, $result->getErrorCollection());
     }
 
+    /**
+     * Action for init.
+     *
+     * @return void
+     */
     public function initAction(): void
     {
-        $this->add2log(Loc::getMessage('WC_DEBUG1C_STARTED', ['#URL#' => $this->params['EXCHANGE_URL']]));
+        $this->runAction('init');
+    }
+
+    /**
+     * Action for silence.
+     *
+     * @return void
+     */
+    public function silenceAction(): void
+    {
+        // /bitrix/services/main/ajax.php?mode=ajax&c=wc:debug1c&action=silence&type=catalog&work=import&login=admin&password=admin
+        $this->runAction('silence');
+    }
+
+    /**
+     * @param string $mode Режим (для лога).
+     *
+     * @return void
+     */
+    private function runAction(string $mode) : void
+    {
+        $this->add2log('Mode:  ' . $mode . '||' . Loc::getMessage('WC_DEBUG1C_STARTED', ['#URL#' => $this->params['EXCHANGE_URL']]));
 
         if ($this->modeCheckAuth()) {
             $this->modeController();
@@ -90,14 +179,21 @@ class Debug1CAjaxController extends Controller
         $this->add2log(Loc::getMessage('WC_DEBUG1C_COMPLETED'));
     }
 
-    private function getParams(): ?array
+    /**
+     * Подготовить параметры.
+     *
+     * @param array $params Параметры.
+     *
+     * @return array|null
+     * @throws ArgumentException
+     */
+    private function getParams(array $params): ?array
     {
-        $params = $this->request->toArray() ?: [];
-
         // TYPE_MODE
         if ($params['TYPE_MODE'] && $dataType = Json::decode(htmlspecialcharsback($params['TYPE_MODE']))) {
             $params = array_merge($params, $dataType);
         } else {
+            $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_MODE_NOT_SELECTED')));
             $this->add2log(Loc::getMessage('WC_DEBUG1C_MODE_NOT_SELECTED'));
             return null;
         }
@@ -107,6 +203,7 @@ class Debug1CAjaxController extends Controller
             $this->class::getExchangeUrl($params['EXCHANGE_URL']) : $this->class::getExchangeUrl()) {
             $params['EXCHANGE_URL'] = $exchangeUrl;
         } else {
+            $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_FILE_NOT_EXIST', ['#FILE#' => $params['EXCHANGE_URL']])));
             $this->add2log(Loc::getMessage('WC_DEBUG1C_FILE_NOT_EXIST', ['#FILE#' => $params['EXCHANGE_URL']]));
             return null;
         }
@@ -116,23 +213,30 @@ class Debug1CAjaxController extends Controller
 
     private function add2log($str): void
     {
-        $str = preg_replace("/[\\n]/", " ", $str);
+        $str = preg_replace("/[\\n]/", ' ', $str);
         $this->log .= date('d.m.y H:i:s') . ": $str \n";
 
         file_put_contents($this->logFile, $this->log);
     }
 
-    private function createHttpClient(): bool
+    /**
+     * Клиент для запроса.
+     *
+     * @param array $unsignedParameters "Неподписанные" параметры.
+     *
+     * @return boolean
+     */
+    private function createHttpClient(array $unsignedParameters = []): bool
     {
         $this->httpClient = new HttpClient();
 
-        $unsignedParameters = $this->getUnsignedParameters();
-
-        if (!$unsignedParameters['LOGIN']){
+        if (!$unsignedParameters['LOGIN']) {
+            $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'LOGIN'])));
             $this->add2log(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'LOGIN']));
             return false;
         }
-        if (!$unsignedParameters['PASSWORD']){
+        if (!$unsignedParameters['PASSWORD']) {
+            $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'PASSWORD'])));
             $this->add2log(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'PASSWORD']));
             return false;
         }
@@ -143,6 +247,7 @@ class Debug1CAjaxController extends Controller
         $cookie = $this->httpClient->getCookies()->toArray();
 
         if (!$cookie['PHPSESSID']) {
+            $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_CREATE_ERROR')));
             $this->add2log(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_CREATE_ERROR'));
             return false;
         }
@@ -152,6 +257,9 @@ class Debug1CAjaxController extends Controller
         return true;
     }
 
+    /**
+     * @return boolean
+     */
     private function modeCheckAuth(): bool
     {
         $url = "{$this->params['EXCHANGE_URL']}?type={$this->params['TYPE']}&mode=checkauth";
@@ -165,16 +273,29 @@ class Debug1CAjaxController extends Controller
             return true;
         }
 
+        $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_AUTH_ERROR')));
         $this->add2log(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_AUTH_ERROR'));
 
         return false;
     }
 
-    private function convertEncoding($str): string
+    /**
+     * @param string $str
+     *
+     * @return string
+     */
+    private function convertEncoding(string $str): string
     {
         return mb_convert_encoding($str, 'UTF-8', 'windows-1251'); // todo в параметр
     }
 
+    /**
+     * @return void
+     * @throws ArgumentException
+     * @throws ArgumentNullException
+     * @throws ArgumentOutOfRangeException
+     * @throws NotImplementedException
+     */
     private function modeController(): void
     {
         switch ($this->params['TYPE']) {
@@ -206,16 +327,18 @@ class Debug1CAjaxController extends Controller
                         $this->modeInit();
                         $this->modeQuery();
                         break;
-                    case'info':
+                    case 'info':
                         $this->modeInfo();
                         break;
-                    case'exchange-order':
+                    case 'exchange-order':
                         $this->add2log(Loc::getMessage('WC_DEBUG1C_SEARCHING_ORDER'));
 
                         if ($this->params['EXCHANGE_ORDER_ID'] > 0 && $order = Order::load($this->params['EXCHANGE_ORDER_ID'])) {
                             $this->add2log(Loc::getMessage('WC_DEBUG1C_ORDER_FOUND', ['#ORDER_ID#' => $this->params['EXCHANGE_ORDER_ID']]));
                         } else {
-                            $this->add2log(Loc::getMessage('WC_DEBUG1C_ORDER_NOT_FOUND', ['#ORDER_ID#' => $this->params['EXCHANGE_ORDER_ID']]));
+                            $this->add2log(
+                                Loc::getMessage('WC_DEBUG1C_ORDER_NOT_FOUND', ['#ORDER_ID#' => $this->params['EXCHANGE_ORDER_ID']])
+                            );
                             break;
                         }
 
@@ -242,7 +365,12 @@ class Debug1CAjaxController extends Controller
         }
     }
 
-    private function getImportFile($dir): ?string
+    /**
+     * @param string $dir Директория.
+     *
+     * @return string
+     */
+    private function getImportFile(string $dir): ?string
     {
         $files = scandir("{$_SERVER['DOCUMENT_ROOT']}/upload/$dir/", 1);
 
@@ -256,10 +384,15 @@ class Debug1CAjaxController extends Controller
 
         $this->add2log(Loc::getMessage('WC_DEBUG1C_FILE_NOT_FOUND'));
 
-        return null;
+        return '';
     }
 
-    private function modeImport($file): void
+    /**
+     * @param string $file Файл.
+     *
+     * @return void
+     */
+    private function modeImport(string $file): void
     {
         $url = "{$this->params['EXCHANGE_URL']}?type={$this->params['TYPE']}&mode={$this->params['MODE']}&sessid=$this->sessid&filename=$file";
         $get = $this->convertEncoding($this->httpClient->get($url));
@@ -273,6 +406,9 @@ class Debug1CAjaxController extends Controller
         }
     }
 
+    /**
+     * @return void
+     */
     private function modeInit(): void
     {
         $version = $this->params['VERSION'] ? "version={$this->params['VERSION']}" : '';
@@ -283,6 +419,9 @@ class Debug1CAjaxController extends Controller
         }
     }
 
+    /**
+     * @return void
+     */
     private function modeQuery(): void
     {
         $orderId = $this->params['QUERY_ORDER_ID'] ? "orderId={$this->params['QUERY_ORDER_ID']}" : '';
@@ -293,6 +432,9 @@ class Debug1CAjaxController extends Controller
         $this->add2log(Loc::getMessage('WC_DEBUG1C_FILE_LINK', ['#FILE#' => $this->class::getPathOrderFile(false)]));
     }
 
+    /**
+     * @return void
+     */
     private function modeInfo(): void
     {
         $url = "{$this->params['EXCHANGE_URL']}?type={$this->params['TYPE']}&mode={$this->params['MODE']}&sessid=$this->sessid";
