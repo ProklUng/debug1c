@@ -98,10 +98,8 @@ class Debug1CAjaxController extends Controller
                 $login = (string)$this->request->getQuery('login');
                 $password = (string)$this->request->getQuery('password');
 
-                $timelimit = (int)$this->request->getQuery('timelimit');
-                if ($timelimit) {
-                    @set_time_limit($timelimit);
-                }
+                // timelimit & max_memory
+                $this->setParamScript();
 
                 $unsignedParameters = ['LOGIN' => $login, 'PASSWORD' => $password];
 
@@ -130,6 +128,30 @@ class Debug1CAjaxController extends Controller
         }
 
         return true;
+    }
+
+    /**
+     * Параметры исполнения скрипта.
+     *
+     * @return void
+     */
+    private function setParamScript() : void
+    {
+        $timelimit = (int)$this->request->getQuery('time_limit');
+        if ($timelimit) {
+            @set_time_limit($timelimit);
+        }
+
+        $memory_limit = $this->request->getQuery('memory_limit');
+
+        if (strlen((string)$memory_limit) > 0) {
+            $memory_limit_value = (int)$memory_limit;
+            if ($memory_limit_value > 0) {
+                @ini_set("memory_limit", $memory_limit . 'M');
+            } elseif ($memory_limit_value === -1) {
+                @ini_set("memory_limit", -1);
+            }
+        }
     }
 
     /**
