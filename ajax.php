@@ -97,6 +97,12 @@ class Debug1CAjaxController extends Controller
 
                 $login = (string)$this->request->getQuery('login');
                 $password = (string)$this->request->getQuery('password');
+
+                $timelimit = (int)$this->request->getQuery('timelimit');
+                if ($timelimit) {
+                    @set_time_limit($timelimit);
+                }
+
                 $unsignedParameters = ['LOGIN' => $login, 'PASSWORD' => $password];
 
                 if (!$this->params = $this->getParams($params)) {

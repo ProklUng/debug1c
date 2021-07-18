@@ -1,21 +1,27 @@
 <?php
 
-
 namespace WC\Components;
-
 
 use Bitrix\Main\IO\File;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\SystemException;
+use CUtil;
 
 class Debug1C extends \CBitrixComponent
 {
+    /**
+     * @inheritdoc
+     */
     public function __construct($component = null)
     {
         parent::__construct($component);
 
-        \CUtil::InitJSCore(['ajax']);
+        CUtil::InitJSCore(['ajax']);
     }
 
+    /**
+     * @inheritdoc
+     */
     public function onPrepareComponentParams($arParams): array
     {
         $arParams['LOG_FILE'] = self::getPathLogFile(false);
@@ -23,6 +29,9 @@ class Debug1C extends \CBitrixComponent
         return $arParams;
     }
 
+    /**
+     * @inheritdoc
+     */
     public function executeComponent()
     {
         global $USER;
@@ -33,7 +42,7 @@ class Debug1C extends \CBitrixComponent
             $this->arResult['USER_INFO']['IS_ADMIN'] = $USER->IsAdmin();
 
             if (!self::prepareTmpDir()) {
-                throw new \Bitrix\Main\SystemException(Loc::getMessage('WC_DEBUG1C_PREPARE_DIR_ERROR'));
+                throw new SystemException(Loc::getMessage('WC_DEBUG1C_PREPARE_DIR_ERROR'));
             }
 
             $this->includeComponentTemplate();
@@ -42,6 +51,9 @@ class Debug1C extends \CBitrixComponent
         }
     }
 
+    /**
+     * @inheritdoc
+     */
     protected function listKeysSignedParameters(): array
     {
         return ['PASSWORD', 'LOGIN'];
