@@ -18,6 +18,7 @@ use Bitrix\Main\Result;
 use Bitrix\Main\Web\HttpClient;
 use Bitrix\Main\Web\Json;
 use Bitrix\Sale\Order;
+use SplFileInfo;
 
 Loc::loadMessages(__FILE__);
 Loc::loadMessages(__DIR__ . '/class.php');
@@ -83,6 +84,7 @@ class Debug1CAjaxController extends Controller
 
     /**
      * @inheritDoc
+     * @throws ArgumentException
      */
     public function processBeforeAction(Action $action): bool
     {
@@ -115,6 +117,7 @@ class Debug1CAjaxController extends Controller
                 break;
             case 'init':
                 $params = $this->request->toArray() ?: [];
+
                 if (!$this->params = $this->getParams($params)) {
                     return false;
                 }
@@ -147,9 +150,9 @@ class Debug1CAjaxController extends Controller
         if (strlen((string)$memory_limit) > 0) {
             $memory_limit_value = (int)$memory_limit;
             if ($memory_limit_value > 0) {
-                @ini_set("memory_limit", $memory_limit . 'M');
+                @ini_set('memory_limit', $memory_limit . 'M');
             } elseif ($memory_limit_value === -1) {
-                @ini_set("memory_limit", -1);
+                @ini_set('memory_limit', -1);
             }
         }
     }
@@ -212,18 +215,35 @@ class Debug1CAjaxController extends Controller
      *
      * @param array $params Параметры.
      *
-     * @return array|null
+     * @return array
      * @throws ArgumentException
      */
-    private function getParams(array $params): ?array
+    private function getParams(array $params): array
     {
+        // Параметры запуска скрипта
+        if ($params['TIME_LIMIT']) {
+            $timelimit = (int)$params['TIME_LIMIT'];
+            if ($timelimit) {
+                @set_time_limit($timelimit);
+            }
+        }
+
+        if (strlen((string)$params['MEMORY_LIMIT']) > 0) {
+            $memory_limit_value = (int)$params['MEMORY_LIMIT'];
+            if ($memory_limit_value > 0) {
+                @ini_set('memory_limit', (string)$params['MEMORY_LIMIT'] . 'M');
+            } elseif ($memory_limit_value === -1) {
+                @ini_set('memory_limit', -1);
+            }
+        }
+
         // TYPE_MODE
         if ($params['TYPE_MODE'] && $dataType = Json::decode(htmlspecialcharsback($params['TYPE_MODE']))) {
             $params = array_merge($params, $dataType);
         } else {
             $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_MODE_NOT_SELECTED')));
             $this->add2log(Loc::getMessage('WC_DEBUG1C_MODE_NOT_SELECTED'));
-            return null;
+            return [];
         }
 
         // EXCHANGE_URL
@@ -233,12 +253,15 @@ class Debug1CAjaxController extends Controller
         } else {
             $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_FILE_NOT_EXIST', ['#FILE#' => $params['EXCHANGE_URL']])));
             $this->add2log(Loc::getMessage('WC_DEBUG1C_FILE_NOT_EXIST', ['#FILE#' => $params['EXCHANGE_URL']]));
-            return null;
+            return [];
         }
 
         return $params;
     }
 
+    /**
+     * @param mixed $str
+     */
     private function add2log($str): void
     {
         $str = preg_replace("/[\\n]/", ' ', $str);
@@ -403,7 +426,7 @@ class Debug1CAjaxController extends Controller
         $files = scandir("{$_SERVER['DOCUMENT_ROOT']}/upload/$dir/", 1);
 
         foreach ($files as $file) {
-            $info = new \SplFileInfo($file);
+            $info = new SplFileInfo($file);
 
             if ($info->getExtension() === 'xml') {
                 return $file;

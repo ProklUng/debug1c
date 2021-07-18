@@ -1,4 +1,10 @@
-<?
+<?php
+
+/**
+ * @var array $arParams
+ * @var array $arResult
+ * @var CMain $APPLICATION
+ */
 if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED !== true) {
     die();
 }
@@ -99,6 +105,12 @@ $this->setFrameMode(false);
                         </td>
                     </tr>
                 </table>
+                <?php if ($arParams['TIME_LIMIT']) :?>
+                    <input type="hidden" name="TIME_LIMIT" value='<?php echo $arParams['TIME_LIMIT']?>'>
+                <?php endif;?>
+                <?php if ($arParams['MEMORY_LIMIT']) :?>
+                    <input type="hidden" name="MEMORY_LIMIT" value='<?php echo $arParams['MEMORY_LIMIT']?>'>
+                <?php endif;?>
                 <button data-action-submit type="submit">
                     <?= GetMessage('WC_DEBUG1C_SUBMIT_BUTTON') ?>
                 </button>
@@ -113,7 +125,7 @@ $this->setFrameMode(false);
     </tr>
 </table>
 
-<script type="text/javascript">
+<script>
     BX.ready(() => {
         if (!window.hasOwnProperty('WCDebug1C')) {
             window.WCDebug1C = new WCDebug1C(<?=Bitrix\Main\Web\Json::encode([

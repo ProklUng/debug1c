@@ -149,6 +149,20 @@ class Runner
 * Указать в параметрах компонента логин\пароль для http клиента дебага
 * Ограничение доступа можно настроить через .access.php
 
+```php
+        $APPLICATION->IncludeComponent(
+            'wc:debug1c',
+            '',
+            [
+                'LOGIN' => 'admin',
+                'PASSWORD' => 'admin',
+                'TIME_LIMIT' => 6000,
+                'MEMORY_LIMIT' => -1,
+            ],
+            false
+        );
+```
+
 ### Режимы
 * Catalog Import - загрузка каталога в ИБ (/upload/1c_catalog/*)
 * Sale Import - загрузка заказов (/upload/1c_exchange/*)
