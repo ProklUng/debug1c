@@ -110,15 +110,6 @@ class Debug1CAjaxController extends Controller
 
                 break;
             case 'init':
-                $params = $this->request->toArray() ?: [];
-                if (!$this->params = $this->getParams($params)) {
-                    return false;
-                }
-
-                if (!$this->createHttpClient($this->getUnsignedParameters())) {
-                    $this->addError(new Error('Error creating http client'));
-                    return false;
-                }
 
                 break;
         }
@@ -148,15 +139,25 @@ class Debug1CAjaxController extends Controller
      * @throws ArgumentOutOfRangeException
      * @throws NotImplementedException
      */
-    public function initAction(): void
+    public function initAction(): string
     {
-        $this->add2log('Mode: init  ||' . Loc::getMessage('WC_DEBUG1C_STARTED', ['#URL#' => $this->params['EXCHANGE_URL']]));
+        $this->add2log(Loc::getMessage('WC_DEBUG1C_STARTED'));
 
-        if ($this->modeCheckAuth()) {
+        $this->params = $this->getParams($this->request->toArray() ?: []);
+        $this->httpClient = $this->createHttpClient();
+
+        if (empty($this->getErrors())) {
+            $this->modeCheckAuth();
+        }
+
+        if (empty($this->getErrors())) {
             $this->modeController();
         }
 
         $this->add2log(Loc::getMessage('WC_DEBUG1C_COMPLETED'));
+
+        return empty($this->getErrors()) ?
+            Loc::getMessage('WC_DEBUG1C_COMPLETED_SUCCESS') : Loc::getMessage('WC_DEBUG1C_COMPLETED_ERROR');
     }
 
     /**
@@ -212,10 +213,26 @@ class Debug1CAjaxController extends Controller
         return $params;
     }
 
-    private function add2log($str): void
+    /**
+     * @param string $message
+     *
+     * @return void
+     */
+    private function add2logError(string $message): void
     {
-        $str = preg_replace("/[\\n]/", ' ', $str);
-        $this->log .= date('d.m.y H:i:s') . ": $str \n";
+        $this->addError(new Error($message));
+        $this->add2log($message);
+    }
+
+    /**
+     * @param string $message
+     *
+     * @return void
+     */
+    private function add2log(string $message): void
+    {
+        $message = preg_replace("/[\\n]/", ' ', $message);
+        $this->log .= date('d.m.y H:i:s') . ": $message \n";
 
         file_put_contents($this->logFile, $this->log);
     }
@@ -223,39 +240,41 @@ class Debug1CAjaxController extends Controller
     /**
      * Клиент для запроса.
      *
-     * @param array $unsignedParameters "Неподписанные" параметры.
+     * @param array $unsignedParameters Неподписанные параметры.
      *
-     * @return boolean
+     * @return HttpClient | null
      */
-    private function createHttpClient(array $unsignedParameters = []): bool
+    private function createHttpClient(array $unsignedParameters = []): ?HttpClient
     {
-        $this->httpClient = new HttpClient();
+        $httpClient = new HttpClient();
+
+        if (!$unsignedParameters) {
+            $unsignedParameters = $this->getUnsignedParameters();
+        }
 
         if (!$unsignedParameters['LOGIN']) {
-            $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'LOGIN'])));
-            $this->add2log(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'LOGIN']));
-            return false;
+            $this->add2logError(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'LOGIN']));
+            return null;
         }
+
         if (!$unsignedParameters['PASSWORD']) {
-            $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'PASSWORD'])));
-            $this->add2log(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'PASSWORD']));
-            return false;
+            $this->add2logError(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'PASSWORD']));
+            return null;
         }
 
-        $this->httpClient->setAuthorization($unsignedParameters['LOGIN'], $unsignedParameters['PASSWORD']);
+        $httpClient->setAuthorization($unsignedParameters['LOGIN'], $unsignedParameters['PASSWORD']);
 
-        $this->httpClient->get($this->params['EXCHANGE_URL']);
-        $cookie = $this->httpClient->getCookies()->toArray();
+        $httpClient->get($this->params['EXCHANGE_URL']);
+        $cookie = $httpClient->getCookies()->toArray();
 
         if (!$cookie['PHPSESSID']) {
-            $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_CREATE_ERROR')));
-            $this->add2log(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_CREATE_ERROR'));
-            return false;
+            $this->add2logError(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_CREATE_ERROR'));
+            return null;
         }
 
-        $this->httpClient->setCookies(['PHPSESSID' => $cookie['PHPSESSID'], 'XDEBUG_SESSION' => 'PHPSTORM']); // todo в параметр
+        $httpClient->setCookies(['PHPSESSID' => $cookie['PHPSESSID'], 'XDEBUG_SESSION' => 'PHPSTORM']); // todo в параметр
 
-        return true;
+        return $httpClient;
     }
 
     /**
