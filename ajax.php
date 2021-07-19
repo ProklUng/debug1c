@@ -5,16 +5,13 @@ namespace WC\Components;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\ArgumentNullException;
 use Bitrix\Main\ArgumentOutOfRangeException;
-use Bitrix\Main\Engine\Action;
 use Bitrix\Main\Engine\Controller;
-use Bitrix\Main\Engine\Response\AjaxJson;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 use Bitrix\Main\LoaderException;
 use Bitrix\Main\NotImplementedException;
 use Bitrix\Main\Request;
 use Bitrix\Main\Localization\Loc;
-use Bitrix\Main\Result;
 use Bitrix\Main\Web\HttpClient;
 use Bitrix\Main\Web\Json;
 use Bitrix\Sale\Order;
@@ -82,42 +79,6 @@ class Debug1CAjaxController extends Controller
     }
 
     /**
-     * @inheritDoc
-     */
-    public function processBeforeAction(Action $action): bool
-    {
-        switch ($action->getName()) {
-            case 'silence':
-                $type = $this->request->getQuery('type') ?? 'catalog';
-                $mode = (string)$this->request->getQuery('work');
-                $params = [
-                    'TYPE_MODE' => json_encode(['TYPE' => $type, 'MODE' => $mode]),
-                    'EXCHANGE_URL' => $this->request->getQuery('exchange')
-                ];
-
-                $login = (string)$this->request->getQuery('login');
-                $password = (string)$this->request->getQuery('password');
-                $unsignedParameters = ['LOGIN' => $login, 'PASSWORD' => $password];
-
-                if (!$this->params = $this->getParams($params)) {
-                    return false;
-                }
-
-                if (!$this->createHttpClient($unsignedParameters)) {
-                    $this->addError(new Error('Error creating http client'));
-                    return false;
-                }
-
-                break;
-            case 'init':
-
-                break;
-        }
-
-        return true;
-    }
-
-    /**
      * @return string
      */
     public function prepareAction(): string
@@ -163,22 +124,42 @@ class Debug1CAjaxController extends Controller
     /**
      * Action for silence.
      *
-     * @return void
+     * @return string
      * @throws ArgumentException
      * @throws ArgumentNullException
      * @throws ArgumentOutOfRangeException
      * @throws NotImplementedException
      */
-    public function silenceAction(): void
+    public function silenceAction(): string
     {
+        $type = $this->request->getQuery('type') ?? 'catalog';
+        $mode = (string)$this->request->getQuery('work');
+        $params = [
+            'TYPE_MODE' => json_encode(['TYPE' => $type, 'MODE' => $mode]),
+            'EXCHANGE_URL' => $this->request->getQuery('exchange')
+        ];
+
+        $login = (string)$this->request->getQuery('login');
+        $password = (string)$this->request->getQuery('password');
+        $unsignedParameters = ['LOGIN' => $login, 'PASSWORD' => $password];
+
+        $this->params = $this->getParams($params);
+        $this->httpClient = $this->createHttpClient($unsignedParameters);
+
         // /bitrix/services/main/ajax.php?mode=ajax&c=wc:debug1c&action=silence&type=catalog&work=import&login=admin&password=admin
         $this->add2log('Mode: silence ||' . Loc::getMessage('WC_DEBUG1C_STARTED', ['#URL#' => $this->params['EXCHANGE_URL']]));
 
-        if ($this->modeCheckAuth()) {
-            $this->modeController();
+
+        if (empty($this->getErrors())) {
+            if ($this->modeCheckAuth()) {
+                $this->modeController();
+            }
         }
 
         $this->add2log(Loc::getMessage('WC_DEBUG1C_COMPLETED'));
+
+        return empty($this->getErrors()) ?
+            Loc::getMessage('WC_DEBUG1C_COMPLETED_SUCCESS') : Loc::getMessage('WC_DEBUG1C_COMPLETED_ERROR');
     }
 
     /**
@@ -195,8 +176,7 @@ class Debug1CAjaxController extends Controller
         if ($params['TYPE_MODE'] && $dataType = Json::decode(htmlspecialcharsback($params['TYPE_MODE']))) {
             $params = array_merge($params, $dataType);
         } else {
-            $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_MODE_NOT_SELECTED')));
-            $this->add2log(Loc::getMessage('WC_DEBUG1C_MODE_NOT_SELECTED'));
+            $this->add2logError(Loc::getMessage('WC_DEBUG1C_MODE_NOT_SELECTED'));
             return null;
         }
 
@@ -205,8 +185,7 @@ class Debug1CAjaxController extends Controller
             $this->class::getExchangeUrl($params['EXCHANGE_URL']) : $this->class::getExchangeUrl()) {
             $params['EXCHANGE_URL'] = $exchangeUrl;
         } else {
-            $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_FILE_NOT_EXIST', ['#FILE#' => $params['EXCHANGE_URL']])));
-            $this->add2log(Loc::getMessage('WC_DEBUG1C_FILE_NOT_EXIST', ['#FILE#' => $params['EXCHANGE_URL']]));
+            $this->add2logError(Loc::getMessage('WC_DEBUG1C_FILE_NOT_EXIST', ['#FILE#' => $params['EXCHANGE_URL']]));
             return null;
         }
 
