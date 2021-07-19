@@ -18,7 +18,6 @@ use Bitrix\Main\Result;
 use Bitrix\Main\Web\HttpClient;
 use Bitrix\Main\Web\Json;
 use Bitrix\Sale\Order;
-use SplFileInfo;
 
 Loc::loadMessages(__FILE__);
 Loc::loadMessages(__DIR__ . '/class.php');
@@ -84,7 +83,6 @@ class Debug1CAjaxController extends Controller
 
     /**
      * @inheritDoc
-     * @throws ArgumentException
      */
     public function processBeforeAction(Action $action): bool
     {
@@ -99,10 +97,6 @@ class Debug1CAjaxController extends Controller
 
                 $login = (string)$this->request->getQuery('login');
                 $password = (string)$this->request->getQuery('password');
-
-                // timelimit & max_memory
-                $this->setParamScript();
-
                 $unsignedParameters = ['LOGIN' => $login, 'PASSWORD' => $password];
 
                 if (!$this->params = $this->getParams($params)) {
@@ -117,7 +111,6 @@ class Debug1CAjaxController extends Controller
                 break;
             case 'init':
                 $params = $this->request->toArray() ?: [];
-
                 if (!$this->params = $this->getParams($params)) {
                     return false;
                 }
@@ -134,74 +127,51 @@ class Debug1CAjaxController extends Controller
     }
 
     /**
-     * Параметры исполнения скрипта.
-     *
-     * @return void
+     * @return string
      */
-    private function setParamScript() : void
+    public function prepareAction(): string
     {
-        $timelimit = (int)$this->request->getQuery('time_limit');
-        if ($timelimit) {
-            @set_time_limit($timelimit);
-        }
-
-        $memory_limit = $this->request->getQuery('memory_limit');
-
-        if (strlen((string)$memory_limit) > 0) {
-            $memory_limit_value = (int)$memory_limit;
-            if ($memory_limit_value > 0) {
-                @ini_set('memory_limit', $memory_limit . 'M');
-            } elseif ($memory_limit_value === -1) {
-                @ini_set('memory_limit', -1);
-            }
-        }
-    }
-
-    /**
-     * @return AjaxJson
-     */
-    public function prepareAction(): AjaxJson
-    {
-        $result = new Result();
-
         if (!$this->class::prepareTmpDir()) {
-            $result->addError(new Error(Loc::getMessage('WC_DEBUG1C_PREPARE_DIR_ERROR')));
+            $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_PREPARE_DIR_ERROR')));
         }
 
-        $isSuccess = $result->isSuccess() ? AjaxJson::STATUS_SUCCESS : AjaxJson::STATUS_ERROR;
-
-        return new AjaxJson(null, $isSuccess, $result->getErrorCollection());
+        return count($this->getErrors()) === 0 ?
+            Loc::getMessage('WC_DEBUG1C_PREPARE_DIR_SUCCESS') : Loc::getMessage('WC_DEBUG1C_PREPARE_DIR_ERROR');
     }
 
     /**
      * Action for init.
      *
      * @return void
+     * @throws ArgumentException
+     * @throws ArgumentNullException
+     * @throws ArgumentOutOfRangeException
+     * @throws NotImplementedException
      */
     public function initAction(): void
     {
-        $this->runAction('init');
+        $this->add2log('Mode: init  ||' . Loc::getMessage('WC_DEBUG1C_STARTED', ['#URL#' => $this->params['EXCHANGE_URL']]));
+
+        if ($this->modeCheckAuth()) {
+            $this->modeController();
+        }
+
+        $this->add2log(Loc::getMessage('WC_DEBUG1C_COMPLETED'));
     }
 
     /**
      * Action for silence.
      *
      * @return void
+     * @throws ArgumentException
+     * @throws ArgumentNullException
+     * @throws ArgumentOutOfRangeException
+     * @throws NotImplementedException
      */
     public function silenceAction(): void
     {
         // /bitrix/services/main/ajax.php?mode=ajax&c=wc:debug1c&action=silence&type=catalog&work=import&login=admin&password=admin
-        $this->runAction('silence');
-    }
-
-    /**
-     * @param string $mode Режим (для лога).
-     *
-     * @return void
-     */
-    private function runAction(string $mode) : void
-    {
-        $this->add2log('Mode:  ' . $mode . '||' . Loc::getMessage('WC_DEBUG1C_STARTED', ['#URL#' => $this->params['EXCHANGE_URL']]));
+        $this->add2log('Mode: silence ||' . Loc::getMessage('WC_DEBUG1C_STARTED', ['#URL#' => $this->params['EXCHANGE_URL']]));
 
         if ($this->modeCheckAuth()) {
             $this->modeController();
@@ -215,35 +185,18 @@ class Debug1CAjaxController extends Controller
      *
      * @param array $params Параметры.
      *
-     * @return array
+     * @return array|null
      * @throws ArgumentException
      */
-    private function getParams(array $params): array
+    private function getParams(array $params): ?array
     {
-        // Параметры запуска скрипта
-        if ($params['TIME_LIMIT']) {
-            $timelimit = (int)$params['TIME_LIMIT'];
-            if ($timelimit) {
-                @set_time_limit($timelimit);
-            }
-        }
-
-        if (strlen((string)$params['MEMORY_LIMIT']) > 0) {
-            $memory_limit_value = (int)$params['MEMORY_LIMIT'];
-            if ($memory_limit_value > 0) {
-                @ini_set('memory_limit', (string)$params['MEMORY_LIMIT'] . 'M');
-            } elseif ($memory_limit_value === -1) {
-                @ini_set('memory_limit', -1);
-            }
-        }
-
         // TYPE_MODE
         if ($params['TYPE_MODE'] && $dataType = Json::decode(htmlspecialcharsback($params['TYPE_MODE']))) {
             $params = array_merge($params, $dataType);
         } else {
             $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_MODE_NOT_SELECTED')));
             $this->add2log(Loc::getMessage('WC_DEBUG1C_MODE_NOT_SELECTED'));
-            return [];
+            return null;
         }
 
         // EXCHANGE_URL
@@ -253,15 +206,12 @@ class Debug1CAjaxController extends Controller
         } else {
             $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_FILE_NOT_EXIST', ['#FILE#' => $params['EXCHANGE_URL']])));
             $this->add2log(Loc::getMessage('WC_DEBUG1C_FILE_NOT_EXIST', ['#FILE#' => $params['EXCHANGE_URL']]));
-            return [];
+            return null;
         }
 
         return $params;
     }
 
-    /**
-     * @param mixed $str
-     */
     private function add2log($str): void
     {
         $str = preg_replace("/[\\n]/", ' ', $str);
@@ -426,7 +376,7 @@ class Debug1CAjaxController extends Controller
         $files = scandir("{$_SERVER['DOCUMENT_ROOT']}/upload/$dir/", 1);
 
         foreach ($files as $file) {
-            $info = new SplFileInfo($file);
+            $info = new \SplFileInfo($file);
 
             if ($info->getExtension() === 'xml') {
                 return $file;
