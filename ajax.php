@@ -110,6 +110,7 @@ class Debug1CAjaxController extends Controller
         try {
             $this->httpClient = $this->createHttpClient();
         } catch (RuntimeException $e) {
+            $this->add2log(Loc::getMessage('WC_DEBUG1C_COMPLETED'));
             return $e->getMessage();
         }
 
@@ -156,6 +157,7 @@ class Debug1CAjaxController extends Controller
         try {
             $this->httpClient = $this->createHttpClient($unsignedParameters);
         } catch (RuntimeException $e) {
+            $this->add2log(Loc::getMessage('WC_DEBUG1C_COMPLETED'));
             return $e->getMessage();
         }
 
@@ -282,8 +284,7 @@ class Debug1CAjaxController extends Controller
             return true;
         }
 
-        $this->addError(new Error(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_AUTH_ERROR')));
-        $this->add2log(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_AUTH_ERROR'));
+        $this->add2logError(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_AUTH_ERROR'));
 
         return false;
     }
