@@ -15,6 +15,7 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Web\HttpClient;
 use Bitrix\Main\Web\Json;
 use Bitrix\Sale\Order;
+use RuntimeException;
 
 Loc::loadMessages(__FILE__);
 Loc::loadMessages(__DIR__ . '/class.php');
@@ -105,7 +106,12 @@ class Debug1CAjaxController extends Controller
         $this->add2log(Loc::getMessage('WC_DEBUG1C_STARTED'));
 
         $this->params = $this->getParams($this->request->toArray() ?: []);
-        $this->httpClient = $this->createHttpClient();
+
+        try {
+            $this->httpClient = $this->createHttpClient();
+        } catch (RuntimeException $e) {
+            return $e->getMessage();
+        }
 
         if (empty($this->getErrors())) {
             $this->modeCheckAuth();
@@ -117,7 +123,7 @@ class Debug1CAjaxController extends Controller
 
         $this->add2log(Loc::getMessage('WC_DEBUG1C_COMPLETED'));
 
-        return empty($this->getErrors()) ?
+        return count($this->getErrors()) === 0 ?
             Loc::getMessage('WC_DEBUG1C_COMPLETED_SUCCESS') : Loc::getMessage('WC_DEBUG1C_COMPLETED_ERROR');
     }
 
@@ -132,6 +138,9 @@ class Debug1CAjaxController extends Controller
      */
     public function silenceAction(): string
     {
+        // /bitrix/services/main/ajax.php?mode=ajax&c=wc:debug1c&action=silence&type=catalog&work=import&login=admin&password=admin
+        $this->add2log('Mode: silence || ' . Loc::getMessage('WC_DEBUG1C_STARTED', ['#URL#' => $this->params['EXCHANGE_URL']]));
+
         $type = $this->request->getQuery('type') ?? 'catalog';
         $mode = (string)$this->request->getQuery('work');
         $params = [
@@ -144,13 +153,13 @@ class Debug1CAjaxController extends Controller
         $unsignedParameters = ['LOGIN' => $login, 'PASSWORD' => $password];
 
         $this->params = $this->getParams($params);
-        $this->httpClient = $this->createHttpClient($unsignedParameters);
+        try {
+            $this->httpClient = $this->createHttpClient($unsignedParameters);
+        } catch (RuntimeException $e) {
+            return $e->getMessage();
+        }
 
-        // /bitrix/services/main/ajax.php?mode=ajax&c=wc:debug1c&action=silence&type=catalog&work=import&login=admin&password=admin
-        $this->add2log('Mode: silence ||' . Loc::getMessage('WC_DEBUG1C_STARTED', ['#URL#' => $this->params['EXCHANGE_URL']]));
-
-
-        if (empty($this->getErrors())) {
+        if (count($this->getErrors()) === 0) {
             if ($this->modeCheckAuth()) {
                 $this->modeController();
             }
@@ -158,7 +167,7 @@ class Debug1CAjaxController extends Controller
 
         $this->add2log(Loc::getMessage('WC_DEBUG1C_COMPLETED'));
 
-        return empty($this->getErrors()) ?
+        return count($this->getErrors()) === 0 ?
             Loc::getMessage('WC_DEBUG1C_COMPLETED_SUCCESS') : Loc::getMessage('WC_DEBUG1C_COMPLETED_ERROR');
     }
 
@@ -167,17 +176,17 @@ class Debug1CAjaxController extends Controller
      *
      * @param array $params Параметры.
      *
-     * @return array|null
+     * @return array
      * @throws ArgumentException
      */
-    private function getParams(array $params): ?array
+    private function getParams(array $params): array
     {
         // TYPE_MODE
         if ($params['TYPE_MODE'] && $dataType = Json::decode(htmlspecialcharsback($params['TYPE_MODE']))) {
             $params = array_merge($params, $dataType);
         } else {
             $this->add2logError(Loc::getMessage('WC_DEBUG1C_MODE_NOT_SELECTED'));
-            return null;
+            return [];
         }
 
         // EXCHANGE_URL
@@ -186,7 +195,7 @@ class Debug1CAjaxController extends Controller
             $params['EXCHANGE_URL'] = $exchangeUrl;
         } else {
             $this->add2logError(Loc::getMessage('WC_DEBUG1C_FILE_NOT_EXIST', ['#FILE#' => $params['EXCHANGE_URL']]));
-            return null;
+            return [];
         }
 
         return $params;
@@ -221,9 +230,10 @@ class Debug1CAjaxController extends Controller
      *
      * @param array $unsignedParameters Неподписанные параметры.
      *
-     * @return HttpClient | null
+     * @return HttpClient
+     * @throws RuntimeException
      */
-    private function createHttpClient(array $unsignedParameters = []): ?HttpClient
+    private function createHttpClient(array $unsignedParameters = []): HttpClient
     {
         $httpClient = new HttpClient();
 
@@ -233,12 +243,12 @@ class Debug1CAjaxController extends Controller
 
         if (!$unsignedParameters['LOGIN']) {
             $this->add2logError(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'LOGIN']));
-            return null;
+            throw new RuntimeException(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'LOGIN']));
         }
 
         if (!$unsignedParameters['PASSWORD']) {
             $this->add2logError(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'PASSWORD']));
-            return null;
+            throw new RuntimeException(Loc::getMessage('WC_DEBUG1C_EMPTY_PARAM', ['#PARAM#' => 'PASSWORD']));
         }
 
         $httpClient->setAuthorization($unsignedParameters['LOGIN'], $unsignedParameters['PASSWORD']);
@@ -248,7 +258,7 @@ class Debug1CAjaxController extends Controller
 
         if (!$cookie['PHPSESSID']) {
             $this->add2logError(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_CREATE_ERROR'));
-            return null;
+            throw new RuntimeException(Loc::getMessage('WC_DEBUG1C_HTTP_CLIENT_CREATE_ERROR'));
         }
 
         $httpClient->setCookies(['PHPSESSID' => $cookie['PHPSESSID'], 'XDEBUG_SESSION' => 'PHPSTORM']); // todo в параметр
